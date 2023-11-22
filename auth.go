@@ -20,8 +20,12 @@ type ClientAuthMessage struct {
 	Methods []Method
 }
 
+// +----+----------+----------+
+// |VER | NMETHODS | METHODS  |
+// +----+----------+----------+
+// | 1  |    1     | 1 to 255 |
+// +----+----------+----------+
 func NewClientAuthMessage(conn io.Reader) (*ClientAuthMessage, error) {
-	// 1-version, 1-nMethod
 	buf := make([]byte, 2)
 	_, err := io.ReadFull(conn, buf)
 	if err != nil {
@@ -46,6 +50,11 @@ func NewClientAuthMessage(conn io.Reader) (*ClientAuthMessage, error) {
 	}, nil
 }
 
+// +----+--------+
+// |VER | METHOD |
+// +----+--------+
+// | 1  |   1    |
+// +----+--------+
 func NewServerAuthMessage(conn io.Writer, method Method) error {
 	buf := []byte{SOCKS5_VER, method}
 	_, err := conn.Write(buf)

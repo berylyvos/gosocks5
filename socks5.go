@@ -47,9 +47,18 @@ func handleConnection(conn net.Conn) error {
 		return err
 	}
 
+	if _, err := request(conn); err != nil {
+		return err
+	}
+
 	return nil
 }
 
+// The client enters a negotiation for the authentication method to be used,
+// authenticates with the chosen method, then sends a relay request.
+//
+// The SOCKS server evaluates the request, and either establishes the
+// appropriate connection or denies	it.
 func auth(conn io.ReadWriter) error {
 	clientMessage, err := NewClientAuthMessage(conn)
 	if err != nil {
@@ -70,4 +79,15 @@ func auth(conn io.ReadWriter) error {
 		return errors.New("method not acceptable, expect no-auth")
 	}
 	return NewServerAuthMessage(conn, MethodNoAuth)
+}
+
+// Once the method-dependent subnegotiation has completed, the client
+// sends the request details.
+//
+// The SOCKS server will typically evaluate the request based on source
+// and destination addresses, and return one or more reply messages, as
+// appropriate for the request type.
+func request(conn io.ReadWriter) (io.ReadWriteCloser, error) {
+
+	return nil, nil
 }
