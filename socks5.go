@@ -6,6 +6,9 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
 const (
@@ -29,11 +32,18 @@ func (s *S5Server) Run() error {
 		return err
 	}
 
+	signalStream := make(chan os.Signal, 1)
+	signal.Notify(signalStream, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-signalStream
+		log.Println("SOCKS5 Server shutdown...")
+		listener.Close()
+	}()
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Printf("connection failed from %s: %s", conn.RemoteAddr(), err)
-			continue
+			return nil
 		}
 
 		go func() {
