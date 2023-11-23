@@ -7,10 +7,14 @@ import (
 )
 
 func TestAuth(t *testing.T) {
+	config := &Config{
+		AuthMethod: MethodNoAuth,
+	}
+
 	t.Run("a valid client auth message", func(t *testing.T) {
 		var buf bytes.Buffer
 		buf.Write([]byte{SOCKS5_VER, 2, MethodNoAuth, MethodGSSAPI})
-		if err := auth(&buf); err != nil {
+		if err := auth(&buf, config); err != nil {
 			t.Fatalf("expect error == nil but got %s", err)
 		}
 
@@ -24,7 +28,7 @@ func TestAuth(t *testing.T) {
 	t.Run("an invalid client auth message", func(t *testing.T) {
 		var buf bytes.Buffer
 		buf.Write([]byte{SOCKS5_VER, 2, MethodNoAuth})
-		if err := auth(&buf); err == nil {
+		if err := auth(&buf, config); err == nil {
 			t.Fatalf("expect error == EOF but got nil")
 		} else {
 			t.Logf("%v", err)

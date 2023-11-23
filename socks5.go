@@ -21,11 +21,28 @@ type Server interface {
 }
 
 type S5Server struct {
-	IP   string
-	Port int
+	IP     string
+	Port   int
+	Config *Config
+}
+
+type Config struct {
+	AuthMethod      Method
+	PasswordChecker func(uname, pwd string) bool
+}
+
+func checkConfig(config *Config) error {
+	if config.AuthMethod == MethodPassword && config.PasswordChecker == nil {
+		return ErrPasswordCheckerNotSet
+	}
+	return nil
 }
 
 func (s *S5Server) Run() error {
+	if err := checkConfig(s.Config); err != nil {
+		return err
+	}
+
 	addr := fmt.Sprintf("%s:%d", s.IP, s.Port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -48,15 +65,15 @@ func (s *S5Server) Run() error {
 
 		go func() {
 			defer conn.Close()
-			if err = handleConnection(conn); err != nil {
+			if err = handleConnection(conn, s.Config); err != nil {
 				log.Printf("handle connection failed from %s: %s", conn.RemoteAddr(), err)
 			}
 		}()
 	}
 }
 
-func handleConnection(conn net.Conn) error {
-	if err := auth(conn); err != nil {
+func handleConnection(conn net.Conn, config *Config) error {
+	if err := auth(conn, config); err != nil {
 		return err
 	}
 
@@ -73,16 +90,19 @@ func handleConnection(conn net.Conn) error {
 //
 // The SOCKS server evaluates the request, and either establishes the
 // appropriate connection or denies	it.
-func auth(conn io.ReadWriter) error {
+//
+// The client and server then enter a method-specific sub-negotiation.
+func auth(conn io.ReadWriter, config *Config) error {
 	clientMessage, err := NewClientAuthMessage(conn)
+	log.Printf("client auth message: %+v", *clientMessage)
 	if err != nil {
 		return err
 	}
 
-	// only support no-auth
+	// now we support no-auth, username/password
 	var acceptable bool
 	for _, method := range clientMessage.Methods {
-		if method == MethodNoAuth {
+		if method == config.AuthMethod {
 			acceptable = true
 			break
 		}
@@ -90,9 +110,31 @@ func auth(conn io.ReadWriter) error {
 
 	if !acceptable {
 		NewServerAuthMessage(conn, MethodNoAcceptable)
-		return errors.New("method not acceptable, expect no-auth")
+		return errors.New("authentication method not acceptable")
 	}
-	return NewServerAuthMessage(conn, MethodNoAuth)
+	if err := NewServerAuthMessage(conn, config.AuthMethod); err != nil {
+		return err
+	}
+
+	if config.AuthMethod == MethodPassword {
+		passwordMessage, err := NewClientPasswordMessage(conn)
+		if err != nil {
+			return err
+		}
+
+		if !config.PasswordChecker(passwordMessage.Username,
+			passwordMessage.Password) {
+			WriteServerPasswordMessage(conn, PasswordAuthFailure)
+			return ErrPasswordAuthFailure
+		}
+
+		err = WriteServerPasswordMessage(conn, PasswordAuthSuccess)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // Once the method-dependent subnegotiation has completed, the client
@@ -103,7 +145,7 @@ func auth(conn io.ReadWriter) error {
 // appropriate for the request type.
 func request(conn io.ReadWriter) (io.ReadWriteCloser, error) {
 	message, err := NewClientRequestMessage(conn)
-	log.Printf("%+v", message)
+	log.Printf("client request: %+v", *message)
 	if err != nil {
 		return nil, err
 	}
