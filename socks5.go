@@ -8,7 +8,10 @@ import (
 	"net"
 )
 
-const SOCKS5_VER byte = 0x05
+const (
+	SOCKS5_VER byte = 0x05
+	RSV        byte = 0x00
+)
 
 type Server interface {
 	Run() error
@@ -47,11 +50,12 @@ func handleConnection(conn net.Conn) error {
 		return err
 	}
 
-	if _, err := request(conn); err != nil {
+	dstConn, err := request(conn)
+	if err != nil {
 		return err
 	}
 
-	return nil
+	return forward(conn, dstConn)
 }
 
 // The client enters a negotiation for the authentication method to be used,
@@ -88,6 +92,38 @@ func auth(conn io.ReadWriter) error {
 // and destination addresses, and return one or more reply messages, as
 // appropriate for the request type.
 func request(conn io.ReadWriter) (io.ReadWriteCloser, error) {
+	message, err := NewClientRequestMessage(conn)
+	log.Printf("%+v", message)
+	if err != nil {
+		return nil, err
+	}
 
-	return nil, nil
+	if message.Cmd != CmdConnect {
+		return nil, WriteRequestFailureMessage(conn, RepCommandNotSupported)
+	}
+
+	if message.AddrType == ATypIPv6 {
+		return nil, WriteRequestFailureMessage(conn, RepAddressTypeNotSupported)
+	}
+
+	dstAddr := fmt.Sprintf("%s:%d", message.Addr, message.Port)
+	dstConn, err := net.Dial("tcp", dstAddr)
+	if err != nil {
+		return nil, WriteRequestFailureMessage(conn, RepConnectionRefused)
+	}
+
+	bndAddr := dstConn.LocalAddr().(*net.TCPAddr)
+	return dstConn, WriteRequestSuccessMessage(conn, bndAddr.IP, uint16(bndAddr.Port))
+}
+
+func forward(conn io.ReadWriter, dstConn io.ReadWriteCloser) error {
+	defer dstConn.Close()
+
+	// client -> dst
+	go io.Copy(dstConn, conn)
+
+	// client <- dst
+	_, err := io.Copy(conn, dstConn)
+
+	return err
 }

@@ -1,7 +1,6 @@
 package gosocks5
 
 import (
-	"errors"
 	"io"
 )
 
@@ -33,7 +32,7 @@ func NewClientAuthMessage(conn io.Reader) (*ClientAuthMessage, error) {
 	}
 
 	if buf[0] != SOCKS5_VER {
-		return nil, errors.New("protocol version not support")
+		return nil, ErrVerNotSupport
 	}
 
 	nmethod := buf[1]
