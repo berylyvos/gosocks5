@@ -94,10 +94,10 @@ func handleConnection(conn net.Conn, config *Config) error {
 // The client and server then enter a method-specific sub-negotiation.
 func auth(conn io.ReadWriter, config *Config) error {
 	clientMessage, err := NewClientAuthMessage(conn)
-	log.Printf("client auth message: %+v", *clientMessage)
 	if err != nil {
 		return err
 	}
+	log.Printf("client auth message: %+v", *clientMessage)
 
 	// now we support no-auth, username/password
 	var acceptable bool
@@ -145,10 +145,10 @@ func auth(conn io.ReadWriter, config *Config) error {
 // appropriate for the request type.
 func request(conn io.ReadWriter) (io.ReadWriteCloser, error) {
 	message, err := NewClientRequestMessage(conn)
-	log.Printf("client request: %+v", *message)
 	if err != nil {
 		return nil, err
 	}
+	log.Printf("client request: %+v", *message)
 
 	if message.Cmd != CmdConnect {
 		return nil, WriteRequestFailureMessage(conn, RepCommandNotSupported)
