@@ -1,9 +1,15 @@
 ## Usage
 
-### SOCKS5 Server 
+**No Authentication**
 
 ```
-> go run ./cmd/main.go
+> go run ./cmd/main.go [-m noauth]
+```
+
+**Uername/Password**
+
+```
+> go run ./cmd/main.go -m pwd
 ```
 
 ### Curl as Client
