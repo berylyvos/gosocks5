@@ -26,20 +26,31 @@ type S5Server struct {
 	Config *Config
 }
 
-type Config struct {
-	AuthMethod      Method
+type (
 	PasswordChecker func(uname, pwd string) bool
-}
 
-func checkConfig(config *Config) error {
-	if config.AuthMethod == MethodPassword && config.PasswordChecker == nil {
+	Config struct {
+		AuthMethod Method
+		PwdChecker PasswordChecker
+	}
+)
+
+var (
+	DefaultConfig = &Config{AuthMethod: MethodNoAuth}
+)
+
+func (s *S5Server) initConfig() error {
+	if s.Config == nil {
+		s.Config = DefaultConfig
+	}
+	if s.Config.AuthMethod == MethodPassword && s.Config.PwdChecker == nil {
 		return ErrPasswordCheckerNotSet
 	}
 	return nil
 }
 
 func (s *S5Server) Run() error {
-	if err := checkConfig(s.Config); err != nil {
+	if err := s.initConfig(); err != nil {
 		return err
 	}
 
@@ -122,7 +133,7 @@ func auth(conn io.ReadWriter, config *Config) error {
 			return err
 		}
 
-		if !config.PasswordChecker(passwordMessage.Username,
+		if !config.PwdChecker(passwordMessage.Username,
 			passwordMessage.Password) {
 			WriteServerPasswordMessage(conn, PasswordAuthFailure)
 			return ErrPasswordAuthFailure
