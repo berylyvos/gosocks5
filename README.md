@@ -12,7 +12,9 @@
 > go run ./cmd/main.go -m pwd
 ```
 
-### Curl as Client
+### Client
+
+#### curl
 
 ```
 > curl --proxy socks5://shingo:gnix.com@localhost:1080 https://github.com/berylyvos/gosocks5 -v 
@@ -37,4 +39,28 @@
 < date: Thu, 23 Nov 2023 14:40:50 GMT
 < content-type: text/html; charset=utf-8
 ...
+```
+
+#### Chrome & SwitchyOmega proxy
+
+**OmegaProfile_proxy.pac**
+
+```JavaScript
+var FindProxyForURL = function(init, profiles) {
+    return function(url, host) {
+        "use strict";
+        var result = init, scheme = url.substr(0, url.indexOf(":"));
+        do {
+            result = profiles[result];
+            if (typeof result === "function") result = result(url, host, scheme);
+        } while (typeof result !== "string" || result.charCodeAt(0) === 43);
+        return result;
+    };
+}("+proxy", {
+    "+proxy": function(url, host, scheme) {
+        "use strict";
+        if (/^127\.0\.0\.1$/.test(host) || /^::1$/.test(host) || /^localhost$/.test(host)) return "DIRECT";
+        return "SOCKS5 127.0.0.1:1080; SOCKS 127.0.0.1:1080";
+    }
+});
 ```
