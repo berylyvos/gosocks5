@@ -169,13 +169,22 @@ func request(conn io.ReadWriter) (io.ReadWriteCloser, error) {
 }
 
 func forward(conn io.ReadWriter, dstConn io.ReadWriteCloser) error {
-	defer dstConn.Close()
+	defer func() {
+		if dstConn != nil {
+			dstConn.Close()
+		}
+	}()
 
 	// client -> dst
-	go io.Copy(dstConn, conn)
+	go func() {
+		io.Copy(dstConn, conn)
+	}()
 
 	// client <- dst
-	_, err := io.Copy(conn, dstConn)
+	if dstConn != nil {
+		_, err := io.Copy(conn, dstConn)
+		return err
+	}
 
-	return err
+	return nil
 }
