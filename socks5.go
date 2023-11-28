@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 const (
@@ -32,11 +33,15 @@ type (
 	Config struct {
 		AuthMethod Method
 		PwdChecker PasswordChecker
+		TCPTimeout time.Duration
 	}
 )
 
 var (
-	DefaultConfig = &Config{AuthMethod: MethodNoAuth}
+	DefaultConfig = &Config{
+		AuthMethod: MethodNoAuth,
+		TCPTimeout: time.Second * 5,
+	}
 )
 
 func (s *S5Server) initConfig() error {
@@ -76,24 +81,19 @@ func (s *S5Server) Run() error {
 
 		go func() {
 			defer conn.Close()
-			if err = handleConnection(conn, s.Config); err != nil {
+			if err = s.handleConnection(conn); err != nil {
 				log.Printf("handle connection failed from %s: %s", conn.RemoteAddr(), err)
 			}
 		}()
 	}
 }
 
-func handleConnection(conn net.Conn, config *Config) error {
-	if err := auth(conn, config); err != nil {
+func (s *S5Server) handleConnection(conn net.Conn) error {
+	if err := s.auth(conn); err != nil {
 		return err
 	}
 
-	dstConn, err := request(conn)
-	if err != nil {
-		return err
-	}
-
-	return forward(conn, dstConn)
+	return s.request(conn)
 }
 
 // The client enters a negotiation for the authentication method to be used,
@@ -103,7 +103,7 @@ func handleConnection(conn net.Conn, config *Config) error {
 // appropriate connection or denies	it.
 //
 // The client and server then enter a method-specific sub-negotiation.
-func auth(conn io.ReadWriter, config *Config) error {
+func (s *S5Server) auth(conn io.ReadWriter) error {
 	clientMessage, err := NewClientAuthMessage(conn)
 	if err != nil {
 		return err
@@ -113,7 +113,7 @@ func auth(conn io.ReadWriter, config *Config) error {
 	// now we support no-auth, username/password
 	var acceptable bool
 	for _, method := range clientMessage.Methods {
-		if method == config.AuthMethod {
+		if method == s.Config.AuthMethod {
 			acceptable = true
 			break
 		}
@@ -123,17 +123,17 @@ func auth(conn io.ReadWriter, config *Config) error {
 		NewServerAuthMessage(conn, MethodNoAcceptable)
 		return errors.New("authentication method not acceptable")
 	}
-	if err := NewServerAuthMessage(conn, config.AuthMethod); err != nil {
+	if err := NewServerAuthMessage(conn, s.Config.AuthMethod); err != nil {
 		return err
 	}
 
-	if config.AuthMethod == MethodPassword {
+	if s.Config.AuthMethod == MethodPassword {
 		passwordMessage, err := NewClientPasswordMessage(conn)
 		if err != nil {
 			return err
 		}
 
-		if !config.PwdChecker(passwordMessage.Username,
+		if !s.Config.PwdChecker(passwordMessage.Username,
 			passwordMessage.Password) {
 			WriteServerPasswordMessage(conn, PasswordAuthFailure)
 			return ErrPasswordAuthFailure
@@ -154,29 +154,46 @@ func auth(conn io.ReadWriter, config *Config) error {
 // The SOCKS server will typically evaluate the request based on source
 // and destination addresses, and return one or more reply messages, as
 // appropriate for the request type.
-func request(conn io.ReadWriter) (io.ReadWriteCloser, error) {
+func (s *S5Server) request(conn io.ReadWriter) error {
 	message, err := NewClientRequestMessage(conn)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	log.Printf("client request: %+v", *message)
 
-	if message.Cmd != CmdConnect {
-		return nil, WriteRequestFailureMessage(conn, RepCommandNotSupported)
-	}
-
 	if message.AddrType == ATypIPv6 {
-		return nil, WriteRequestFailureMessage(conn, RepAddressTypeNotSupported)
+		WriteRequestFailureMessage(conn, RepAddressTypeNotSupported)
+		return ErrAtypNotSupport
 	}
 
+	if message.Cmd == CmdConnect {
+		return s.handleTCPRequest(conn, message)
+	} else if message.Cmd == CmdUDP {
+		return s.handleUDPRequest()
+	} else {
+		WriteRequestFailureMessage(conn, RepCommandNotSupported)
+		return ErrCmdNotSupport
+	}
+}
+
+func (s *S5Server) handleTCPRequest(conn io.ReadWriter, message *ClientRequestMessage) error {
 	dstAddr := fmt.Sprintf("%s:%d", message.Addr, message.Port)
-	dstConn, err := net.Dial("tcp", dstAddr)
+	dstConn, err := net.DialTimeout("tcp", dstAddr, s.Config.TCPTimeout)
 	if err != nil {
-		return nil, WriteRequestFailureMessage(conn, RepConnectionRefused)
+		WriteRequestFailureMessage(conn, RepConnectionRefused)
+		return err
 	}
 
 	bndAddr := dstConn.LocalAddr().(*net.TCPAddr)
-	return dstConn, WriteRequestSuccessMessage(conn, bndAddr.IP, uint16(bndAddr.Port))
+	if err := WriteRequestSuccessMessage(conn, bndAddr.IP, uint16(bndAddr.Port)); err != nil {
+		return err
+	}
+
+	return forward(conn, dstConn)
+}
+
+func (s *S5Server) handleUDPRequest() error {
+	return nil
 }
 
 func forward(conn io.ReadWriter, dstConn io.ReadWriteCloser) error {
